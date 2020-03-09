@@ -78,9 +78,9 @@ const sendSlackMessage = async (lastChecked, data, webhookUrl) => {
       color: '#36a64f',
       pretext: 'A container version was recently published!',
       author_name: `${data.container.publicId}: ${data.container.name}`,
-      title: `${data.containerVersionId}: ${data.name || '(no name)'}`,
+      title: `v${data.containerVersionId}: ${data.name || '(no name)'}`,
       title_link: data.tagManagerUrl,
-      text: `New published version found since last check (${prettyMs(delta)} ago).`,
+      text: `*Tags:* ${data.headers.numTags}, *Triggers:* ${data.headers.numTriggers}, *Variables:* ${data.headers.numVariables}.\nNew published version found since last check (${prettyMs(delta)} ago).`,
       mrkdwn_in: ['text'],
       footer: 'by GTM Tools',
       ts: now / 1000
@@ -124,6 +124,14 @@ const checkPublishedVersionIdAgainstState = async (tagmanager, webHookUrl, gtmSt
     parent: `accounts/${accountId}/containers/${containerId}`
   });
 
+  //Get the version header
+  const res_header = await tagmanager.accounts.containers.version_headers.latest({
+    parent: `accounts/${accountId}/containers/${containerId}`
+  });
+
+  //Join in headerdata on the original object
+  res.data['headers'] = res_header.data;
+
   if (!gtmState[accountId][containerId]['containerVersionId']) {
     // Container hasn't been previously polled
     log(`${accountId}_${containerId}: Previous entry missing, setting the current version as the new entry.`);
@@ -137,6 +145,11 @@ const checkPublishedVersionIdAgainstState = async (tagmanager, webHookUrl, gtmSt
   }
   // Update the latest version in the state object to the new, published version ID
   gtmState[accountId][containerId]['containerVersionId'] = res.data.containerVersionId;
+
+  //Update the number of tags, triggers and variables in the container
+  gtmState[accountId][containerId]['tags'] = res_header.data.numTags
+  gtmState[accountId][containerId]['triggers'] = res_header.data.numTriggers
+  gtmState[accountId][containerId]['variables'] = res_header.data.numVariables
 
   return gtmState;
 };
