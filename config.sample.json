@@ -7,5 +7,9 @@
     "slackWebhookUrl": "https://hooks.slack.com/services/YYYY/XXXX/ZZZZ",
     "gtmContainers": ["12345_23456", "12345_34567"]
   }],
+  "extended-features": [{
+    "versionPublishedBy": false,
+    "versionItems": false
+  }],
   "verboseLogging": true
 }

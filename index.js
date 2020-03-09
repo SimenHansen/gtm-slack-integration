@@ -54,6 +54,8 @@ const validateConfig = () => {
   if (!config.hasOwnProperty('slackOutput')) msg += 'config_missing_slackOutput;';
   if (config.slackOutput && config.slackOutput.length === 0) msg += 'config_missing_slackOutput_items;';
   if (config.slackOutput && config.slackOutput.filter(s => s['slackWebhookUrl'] && s['gtmContainers']).length !== config.slackOutput.length) msg += 'invalid_items_in_slackOutput;';
+  if(!config.hasOwnProperty('extended-features')) msg += 'config_missing_extended-features;';
+  if(config.extended-features && config.extended-features.length === 0) msg += 'config_missing_extended-features-items;';
   return {
     error: msg !== '',
     errorMessage: msg
@@ -68,8 +70,9 @@ const validateConfig = () => {
  * @param {timestamp} lastChecked Timestamp when the version was last checked.
  * @param {object} data The container object from the GTM API response.
  * @param {string} webhookUrl URL to send the request to.
+ * @param {string} versionItemsText Formatted textline for versionItems
  */
-const sendSlackMessage = async (lastChecked, data, webhookUrl) => {
+const sendSlackMessage = async (lastChecked, data, webhookUrl, versionItemsText) => {
   const now = new Date().getTime();
   const delta = now - lastChecked;
   return await webhooks[webhookUrl].send({
@@ -80,7 +83,7 @@ const sendSlackMessage = async (lastChecked, data, webhookUrl) => {
       author_name: `${data.container.publicId}: ${data.container.name}`,
       title: `v${data.containerVersionId}: ${data.name || '(no name)'}`,
       title_link: data.tagManagerUrl,
-      text: `*Tags:* ${data.headers.numTags}, *Triggers:* ${data.headers.numTriggers}, *Variables:* ${data.headers.numVariables}.\nNew published version found since last check (${prettyMs(delta)} ago).`,
+      text: `${versionItemsText || ''} New published version found since last check (${prettyMs(delta)} ago).`,
       mrkdwn_in: ['text'],
       footer: 'by GTM Tools',
       ts: now / 1000
@@ -124,13 +127,21 @@ const checkPublishedVersionIdAgainstState = async (tagmanager, webHookUrl, gtmSt
     parent: `accounts/${accountId}/containers/${containerId}`
   });
 
-  //Get the version header
-  const res_header = await tagmanager.accounts.containers.version_headers.latest({
-    parent: `accounts/${accountId}/containers/${containerId}`
-  });
+  //Fetching extra metadata if versionItems is enabled
+  if(config['extended-features']['versionItems'] == true){
+    //Get the version header from API
+    const res_header = await tagmanager.accounts.containers.version_headers.latest({
+      parent: `accounts/${accountId}/containers/${containerId}`
+    });
 
-  //Join in headerdata on the original object
-  res.data['headers'] = res_header.data;
+    //Update the number of tags, triggers and variables in the container
+    gtmState[accountId][containerId]['tags'] = res_header.data.numTags
+    gtmState[accountId][containerId]['triggers'] = res_header.data.numTriggers
+    gtmState[accountId][containerId]['variables'] = res_header.data.numVariables
+
+    //Setting versionItem text for Slack
+    const versionItemsText = `*Tags:* ${res_header.data.numTags}, *Triggers:* ${res_header.data.numTriggers}, *Variables:* ${res_header.data.numVariables}.\n`
+  }  
 
   if (!gtmState[accountId][containerId]['containerVersionId']) {
     // Container hasn't been previously polled
@@ -138,18 +149,13 @@ const checkPublishedVersionIdAgainstState = async (tagmanager, webHookUrl, gtmSt
   } else if (gtmState[accountId][containerId]['containerVersionId'] !== res.data.containerVersionId) {
     // Container version has changed between live version and the one in state
     log(`${accountId}_${containerId}: New version published since previous entry, notifying Slack.`);
-    await sendSlackMessage(gtmState[accountId][containerId]['lastChecked'], res.data, webHookUrl);
+    await sendSlackMessage(gtmState[accountId][containerId]['lastChecked'], res.data, webHookUrl, versionItemsText);
   } else {
     // Container version has stayed the same
     log(`${accountId}_${containerId}: Published version same as previous entry, or new entry altogether.`);
   }
   // Update the latest version in the state object to the new, published version ID
   gtmState[accountId][containerId]['containerVersionId'] = res.data.containerVersionId;
-
-  //Update the number of tags, triggers and variables in the container
-  gtmState[accountId][containerId]['tags'] = res_header.data.numTags
-  gtmState[accountId][containerId]['triggers'] = res_header.data.numTriggers
-  gtmState[accountId][containerId]['variables'] = res_header.data.numVariables
 
   return gtmState;
 };
